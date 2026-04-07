@@ -1,242 +1,427 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { useProfile } from "@/hooks/use-profile";
-import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { formatDate } from "@/lib/utils";
-import Link from "next/link";
 import {
   Building2,
-  Users,
+  User,
+  Phone,
+  Mail,
   MessageSquare,
-  UtensilsCrossed,
+  Camera,
+  Check,
+  Search,
   Plus,
-  TrendingUp,
   Flame,
+  AlertTriangle,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-interface Stats {
-  accounts: number;
-  contacts: number;
-  interactions: number;
-  todayInteractions: number;
-}
-
-interface RecentActivity {
+interface AccountSuggestion {
   id: string;
-  type: string;
-  notes: string;
-  account_name: string;
-  created_at: string;
-  heat_score: number;
+  name: string;
+  city?: string;
+  assigned_email?: string;
 }
 
-export default function DashboardPage() {
-  const { profile, isAdmin } = useProfile();
-  const [stats, setStats] = useState<Stats>({ accounts: 0, contacts: 0, interactions: 0, todayInteractions: 0 });
-  const [recentActivity, setRecentActivity] = useState<RecentActivity[]>([]);
-  const [salesFilter, setSalesFilter] = useState<string>("all");
-  const [salesList, setSalesList] = useState<{ id: string; full_name: string }[]>([]);
+export default function QuickAddPage() {
+  const router = useRouter();
+  const { profile } = useProfile();
+  const supabase = createClient();
 
+  // Account
+  const [accountQuery, setAccountQuery] = useState("");
+  const [suggestions, setSuggestions] = useState<AccountSuggestion[]>([]);
+  const [selectedAccount, setSelectedAccount] = useState<AccountSuggestion | null>(null);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [duplicateWarning, setDuplicateWarning] = useState<string | null>(null);
+
+  // Contact
+  const [contactName, setContactName] = useState("");
+  const [contactPhone, setContactPhone] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
+  const [contactJob, setContactJob] = useState("");
+
+  // Note
+  const [notes, setNotes] = useState("");
+  const [heat, setHeat] = useState<1 | 2 | 3>(2);
+  const [photo, setPhoto] = useState<File | null>(null);
+  const [photoPreview, setPhotoPreview] = useState<string | null>(null);
+
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const photoInputRef = useRef<HTMLInputElement>(null);
+
+  // Search accounts as user types
   useEffect(() => {
-    if (!profile) return;
-    loadData();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile, salesFilter]);
-
-  async function loadData() {
-    const supabase = createClient();
-    const userId = salesFilter === "all" ? null : salesFilter;
-    const filterBy = isAdmin && !userId ? null : userId || profile!.id;
-
-    // Accounts count
-    let accountsQ = supabase.from("accounts").select("id", { count: "exact", head: true });
-    if (filterBy) accountsQ = accountsQ.eq("assigned_to", filterBy);
-    const { count: accountsCount } = await accountsQ;
-
-    // Contacts count
-    let contactsQ = supabase.from("contacts").select("id", { count: "exact", head: true });
-    if (filterBy) contactsQ = contactsQ.eq("created_by", filterBy);
-    const { count: contactsCount } = await contactsQ;
-
-    // Interactions count
-    let interQ = supabase.from("interactions").select("id", { count: "exact", head: true });
-    if (filterBy) interQ = interQ.eq("created_by", filterBy);
-    const { count: interCount } = await interQ;
-
-    // Today interactions
-    const today = new Date().toISOString().split("T")[0];
-    let todayQ = supabase
-      .from("interactions")
-      .select("id", { count: "exact", head: true })
-      .gte("created_at", today);
-    if (filterBy) todayQ = todayQ.eq("created_by", filterBy);
-    const { count: todayCount } = await todayQ;
-
-    setStats({
-      accounts: accountsCount || 0,
-      contacts: contactsCount || 0,
-      interactions: interCount || 0,
-      todayInteractions: todayCount || 0,
-    });
-
-    // Recent activity
-    let recentQ = supabase
-      .from("interactions")
-      .select("id, type, notes, created_at, heat_score, accounts(name)")
-      .order("created_at", { ascending: false })
-      .limit(10);
-    if (filterBy) recentQ = recentQ.eq("created_by", filterBy);
-    const { data: recent } = await recentQ;
-
-    setRecentActivity(
-      (recent || []).map((r: any) => ({
-        ...r,
-        account_name: r.accounts?.name || "—",
-      }))
-    );
-
-    // Sales list for admin filter
-    if (isAdmin) {
-      const { data: sales } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .order("full_name");
-      setSalesList(sales || []);
+    if (!accountQuery || accountQuery.length < 2) {
+      setSuggestions([]);
+      return;
     }
-  }
+    const t = setTimeout(async () => {
+      const { data } = await supabase
+        .from("accounts")
+        .select("id, name, city, assigned_email")
+        .ilike("name", `%${accountQuery}%`)
+        .limit(8);
+      setSuggestions(data || []);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [accountQuery, supabase]);
 
-  const statCards = [
-    { label: "Comptes", value: stats.accounts, icon: Building2, href: "/accounts", color: "text-primary" },
-    { label: "Contacts", value: stats.contacts, icon: Users, href: "/contacts", color: "text-accent" },
-    { label: "Interactions", value: stats.interactions, icon: MessageSquare, href: "/interactions", color: "text-warning" },
-    { label: "Aujourd'hui", value: stats.todayInteractions, icon: TrendingUp, href: "/interactions", color: "text-success" },
-  ];
-
-  const heatIcons = ["", "🟢", "🟡", "🔥"];
-  const typeLabels: Record<string, string> = {
-    visite_stand: "Visite stand",
-    meeting: "Meeting",
-    rencontre: "Rencontre",
-    dinner: "Dinner",
-    soiree: "Soirée",
+  const selectAccount = (acc: AccountSuggestion) => {
+    setSelectedAccount(acc);
+    setAccountQuery(acc.name);
+    setShowSuggestions(false);
+    if (acc.assigned_email && acc.assigned_email !== profile?.email) {
+      setDuplicateWarning(`⚠️ Compte déjà attribué à ${acc.assigned_email.split("@")[0]}`);
+    } else {
+      setDuplicateWarning(null);
+    }
   };
 
+  const clearAccount = () => {
+    setSelectedAccount(null);
+    setAccountQuery("");
+    setDuplicateWarning(null);
+  };
+
+  const handlePhoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (f) {
+      setPhoto(f);
+      setPhotoPreview(URL.createObjectURL(f));
+    }
+  };
+
+  const canSave = useMemo(() => {
+    return (selectedAccount || accountQuery.trim()) && (contactName.trim() || notes.trim());
+  }, [selectedAccount, accountQuery, contactName, notes]);
+
+  const handleSave = async () => {
+    if (!canSave || !profile) return;
+    setSaving(true);
+
+    try {
+      // 1. Account
+      let accountId = selectedAccount?.id;
+      if (!accountId) {
+        const { data: acc, error: accErr } = await supabase
+          .from("accounts")
+          .insert({
+            name: accountQuery.trim(),
+            assigned_to: profile.id,
+            assigned_email: profile.email,
+          })
+          .select("id")
+          .single();
+        if (accErr) throw accErr;
+        accountId = acc.id;
+      }
+
+      // 2. Photo upload
+      let photoUrl: string | null = null;
+      if (photo) {
+        const filename = `${Date.now()}-${photo.name.replace(/[^a-zA-Z0-9.]/g, "_")}`;
+        const { data: up, error: upErr } = await supabase.storage
+          .from("photos")
+          .upload(`quick/${filename}`, photo);
+        if (!upErr && up) {
+          const { data: url } = supabase.storage.from("photos").getPublicUrl(up.path);
+          photoUrl = url.publicUrl;
+        }
+      }
+
+      // 3. Contact (if name provided)
+      let contactId: string | null = null;
+      if (contactName.trim()) {
+        const parts = contactName.trim().split(" ");
+        const firstName = parts[0];
+        const lastName = parts.slice(1).join(" ") || "";
+        const { data: ct } = await supabase
+          .from("contacts")
+          .insert({
+            account_id: accountId,
+            first_name: firstName,
+            last_name: lastName,
+            job_title: contactJob.trim() || null,
+            email: contactEmail.trim() || null,
+            phone: contactPhone.trim() || null,
+            photo_url: photoUrl,
+            tag: "prospect",
+            created_by: profile.id,
+          })
+          .select("id")
+          .single();
+        contactId = ct?.id || null;
+      }
+
+      // 4. Interaction
+      await supabase.from("interactions").insert({
+        account_id: accountId,
+        type: "rencontre",
+        date: new Date().toISOString(),
+        notes: notes.trim() || null,
+        photos: photoUrl ? [photoUrl] : [],
+        status: "a_suivre",
+        heat_score: heat,
+        created_by: profile.id,
+      });
+
+      setSaved(true);
+      setTimeout(() => {
+        // Reset
+        setAccountQuery("");
+        setSelectedAccount(null);
+        setContactName("");
+        setContactPhone("");
+        setContactEmail("");
+        setContactJob("");
+        setNotes("");
+        setHeat(2);
+        setPhoto(null);
+        setPhotoPreview(null);
+        setSaved(false);
+        setDuplicateWarning(null);
+      }, 1500);
+    } catch (e) {
+      console.error(e);
+      alert("Erreur lors de la sauvegarde");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (saved) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center animate-fade-in">
+        <div className="w-20 h-20 rounded-full bg-success/15 text-success flex items-center justify-center mb-4">
+          <Check size={40} strokeWidth={3} />
+        </div>
+        <h2 className="text-xl font-bold">Enregistré !</h2>
+        <p className="text-text-muted text-sm mt-1">Prêt pour le suivant</p>
+      </div>
+    );
+  }
+
   return (
-    <div className="space-y-6">
-      {/* Welcome */}
+    <div className="space-y-4 pb-8 animate-fade-in">
       <div>
-        <h2 className="text-xl font-bold">
-          {isAdmin ? "Dashboard Admin" : `Salut ${profile?.full_name?.split(" ")[0]} 👋`}
-        </h2>
-        <p className="text-text-muted text-sm">GITEX Africa 2026 — Marrakech</p>
+        <h1 className="text-2xl font-bold tracking-tight">Capture rapide</h1>
+        <p className="text-text-muted text-sm">Prends note en 1 shot</p>
       </div>
 
-      {/* Admin filter */}
-      {isAdmin && salesList.length > 0 && (
-        <select
-          value={salesFilter}
-          onChange={(e) => setSalesFilter(e.target.value)}
-          className="text-sm"
-        >
-          <option value="all">Tous les commerciaux</option>
-          {salesList.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.full_name}
-            </option>
-          ))}
-        </select>
-      )}
-
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 gap-3">
-        {statCards.map((s) => (
-          <Link key={s.label} href={s.href}>
-            <Card className="hover:border-primary/50 transition-colors">
-              <div className="flex items-center gap-3">
-                <s.icon size={20} className={s.color} />
-                <div>
-                  <p className="text-2xl font-bold">{s.value}</p>
-                  <p className="text-xs text-text-muted">{s.label}</p>
-                </div>
+      {/* ACCOUNT */}
+      <div className="bg-surface border border-border rounded-2xl p-4 shadow-sm">
+        <label className="flex items-center gap-2 text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">
+          <Building2 size={14} /> Compte / Entreprise
+        </label>
+        <div className="relative">
+          {selectedAccount ? (
+            <div className="flex items-center gap-2 bg-primary-soft border border-primary/30 rounded-xl px-3 py-3">
+              <Building2 size={16} className="text-primary" />
+              <span className="font-medium flex-1">{selectedAccount.name}</span>
+              {selectedAccount.city && (
+                <span className="text-xs text-text-muted">{selectedAccount.city}</span>
+              )}
+              <button
+                onClick={clearAccount}
+                className="text-text-muted hover:text-danger text-xs"
+              >
+                Changer
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="relative">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+                <input
+                  type="text"
+                  value={accountQuery}
+                  onChange={(e) => {
+                    setAccountQuery(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
+                  placeholder="Tape le nom du compte..."
+                  className="pl-9 text-base"
+                />
               </div>
-            </Card>
-          </Link>
-        ))}
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute z-10 left-0 right-0 mt-1 bg-surface border border-border rounded-xl shadow-lg max-h-64 overflow-auto">
+                  {suggestions.map((s) => (
+                    <button
+                      key={s.id}
+                      onClick={() => selectAccount(s)}
+                      className="w-full text-left px-3 py-2.5 hover:bg-surface-2 transition-colors flex items-center justify-between border-b border-border last:border-0"
+                    >
+                      <div>
+                        <div className="text-sm font-medium">{s.name}</div>
+                        {s.city && <div className="text-xs text-text-muted">{s.city}</div>}
+                      </div>
+                      {s.assigned_email && (
+                        <div className="text-[10px] text-text-muted">
+                          {s.assigned_email.split("@")[0]}
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        {duplicateWarning && (
+          <div className="mt-2 flex items-start gap-2 text-xs text-warning bg-warning/10 border border-warning/20 rounded-lg px-3 py-2">
+            <AlertTriangle size={14} className="mt-0.5 flex-shrink-0" />
+            <span>{duplicateWarning}</span>
+          </div>
+        )}
+        {accountQuery && !selectedAccount && suggestions.length === 0 && accountQuery.length > 2 && (
+          <div className="mt-2 text-xs text-text-muted flex items-center gap-1">
+            <Plus size={12} /> Sera créé : <span className="font-medium text-text">{accountQuery}</span>
+          </div>
+        )}
       </div>
 
-      {/* Quick Actions */}
-      <div className="grid grid-cols-2 gap-3">
-        <Link href="/interactions?new=true">
-          <Button variant="primary" size="lg" className="w-full">
-            <Plus size={20} />
-            Nouvelle note
-          </Button>
-        </Link>
-        <Link href="/contacts?new=true">
-          <Button variant="secondary" size="lg" className="w-full">
-            <Users size={20} />
-            Nouveau contact
-          </Button>
-        </Link>
-      </div>
-
-      {/* Dinners Today */}
-      <Link href="/dinners">
-        <Card className="border-warning/30 hover:border-warning/50 transition-colors">
-          <div className="flex items-center gap-3">
-            <UtensilsCrossed size={20} className="text-warning" />
-            <div>
-              <p className="font-semibold">Dinners ce soir</p>
-              <p className="text-sm text-text-muted">Voir le planning</p>
+      {/* CONTACT */}
+      <div className="bg-surface border border-border rounded-2xl p-4 shadow-sm">
+        <label className="flex items-center gap-2 text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
+          <User size={14} /> Personne rencontrée
+        </label>
+        <div className="space-y-2">
+          <input
+            type="text"
+            value={contactName}
+            onChange={(e) => setContactName(e.target.value)}
+            placeholder="Nom Prénom"
+            className="text-base"
+          />
+          <input
+            type="text"
+            value={contactJob}
+            onChange={(e) => setContactJob(e.target.value)}
+            placeholder="Fonction (optionnel)"
+            className="text-sm"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <div className="relative">
+              <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+              <input
+                type="tel"
+                value={contactPhone}
+                onChange={(e) => setContactPhone(e.target.value)}
+                placeholder="Téléphone"
+                className="pl-9 text-sm"
+              />
+            </div>
+            <div className="relative">
+              <Mail size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
+              <input
+                type="email"
+                value={contactEmail}
+                onChange={(e) => setContactEmail(e.target.value)}
+                placeholder="Email"
+                className="pl-9 text-sm"
+              />
             </div>
           </div>
-        </Card>
-      </Link>
-
-      {/* Recent Activity */}
-      <div>
-        <h3 className="text-sm font-bold text-text-muted uppercase tracking-wider mb-3">
-          Activité récente
-        </h3>
-        <div className="space-y-2">
-          {recentActivity.length === 0 && (
-            <Card>
-              <p className="text-text-muted text-center py-4">
-                Aucune activité pour le moment
-              </p>
-            </Card>
-          )}
-          {recentActivity.map((a) => (
-            <Link key={a.id} href={`/interactions/${a.id}`}>
-              <Card className="hover:border-primary/30 transition-colors">
-                <div className="flex items-start justify-between">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm">{heatIcons[a.heat_score]}</span>
-                      <span className="font-medium text-sm truncate">
-                        {a.account_name}
-                      </span>
-                      <Badge variant={a.type === "dinner" ? "oui" : "en_cours"}>
-                        {typeLabels[a.type] || a.type}
-                      </Badge>
-                    </div>
-                    <p className="text-sm text-text-muted truncate">
-                      {a.notes || "Pas de notes"}
-                    </p>
-                  </div>
-                  <span className="text-xs text-text-muted whitespace-nowrap ml-2">
-                    {formatDate(a.created_at)}
-                  </span>
-                </div>
-              </Card>
-            </Link>
-          ))}
         </div>
       </div>
+
+      {/* NOTE */}
+      <div className="bg-surface border border-border rounded-2xl p-4 shadow-sm">
+        <label className="flex items-center gap-2 text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
+          <MessageSquare size={14} /> Notes
+        </label>
+        <textarea
+          value={notes}
+          onChange={(e) => setNotes(e.target.value)}
+          placeholder="Ce qu'on a discuté, besoins, projets, prochaine action..."
+          rows={4}
+          className="text-base resize-none"
+        />
+
+        {/* Heat */}
+        <div className="mt-3">
+          <p className="text-[11px] font-medium text-text-secondary uppercase tracking-wider mb-2">
+            Température
+          </p>
+          <div className="grid grid-cols-3 gap-2">
+            {[
+              { v: 1 as const, label: "Froid", emoji: "🟢", color: "border-blue-500/30 bg-blue-500/5" },
+              { v: 2 as const, label: "Tiède", emoji: "🟡", color: "border-yellow-500/30 bg-yellow-500/5" },
+              { v: 3 as const, label: "Chaud", emoji: "🔥", color: "border-red-500/30 bg-red-500/5" },
+            ].map((opt) => (
+              <button
+                key={opt.v}
+                onClick={() => setHeat(opt.v)}
+                className={cn(
+                  "py-3 rounded-xl border-2 text-sm font-medium transition-all",
+                  heat === opt.v
+                    ? `${opt.color} scale-[1.02]`
+                    : "border-border bg-surface-2 hover:border-border-strong"
+                )}
+              >
+                <div className="text-lg">{opt.emoji}</div>
+                <div className="text-xs mt-0.5">{opt.label}</div>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* PHOTO */}
+      <div className="bg-surface border border-border rounded-2xl p-4 shadow-sm">
+        <label className="flex items-center gap-2 text-xs font-semibold text-text-secondary uppercase tracking-wider mb-3">
+          <Camera size={14} /> Photo (optionnel)
+        </label>
+        <input
+          ref={photoInputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          onChange={handlePhoto}
+          className="hidden"
+        />
+        {photoPreview ? (
+          <div className="relative">
+            <img src={photoPreview} alt="" className="w-full h-48 object-cover rounded-xl" />
+            <button
+              onClick={() => {
+                setPhoto(null);
+                setPhotoPreview(null);
+              }}
+              className="absolute top-2 right-2 bg-bg/80 backdrop-blur text-text px-3 py-1 rounded-lg text-xs"
+            >
+              Retirer
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => photoInputRef.current?.click()}
+            className="w-full h-32 border-2 border-dashed border-border rounded-xl flex flex-col items-center justify-center text-text-muted hover:border-primary hover:text-primary transition-all"
+          >
+            <Camera size={28} />
+            <span className="text-sm mt-1">Prendre une photo</span>
+          </button>
+        )}
+      </div>
+
+      {/* SAVE BUTTON */}
+      <Button
+        onClick={handleSave}
+        disabled={!canSave}
+        loading={saving}
+        size="lg"
+        className="w-full sticky bottom-24"
+      >
+        <Check size={20} />
+        Enregistrer
+      </Button>
     </div>
   );
 }

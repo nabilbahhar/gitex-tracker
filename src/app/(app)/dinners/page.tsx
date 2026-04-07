@@ -3,508 +3,370 @@
 import { useEffect, useState, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useProfile } from "@/hooks/use-profile";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
 import { Modal } from "@/components/ui/modal";
-import { Badge } from "@/components/ui/badge";
-import type { DinnerEvent, DinnerGuest, Contact } from "@/lib/types";
 import {
   UtensilsCrossed,
-  Plus,
   UserPlus,
   Check,
   X,
   HelpCircle,
+  Users,
+  Search,
+  Calendar,
+  Trash2,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
-const HARDCODED_DINNERS: Omit<DinnerEvent, "id">[] = [
-  {
-    day: "Lundi",
-    date: "2025-04-07",
-    restaurant: "Libre",
-    menu_type: "libre",
-    notes: "Chacun invite qui il veut",
-  },
-  {
-    day: "Mardi",
-    date: "2025-04-08",
-    restaurant: "Brahim Pacha",
-    menu_type: "fixe",
-    notes: "Menu fixe",
-  },
-  {
-    day: "Mercredi",
-    date: "2025-04-09",
-    restaurant: "Malak Emrode",
-    menu_type: "fixe",
-    notes: "Menu fixe",
-  },
-  {
-    day: "Jeudi",
-    date: "2025-04-10",
-    restaurant: "A definir",
-    menu_type: "libre",
-    notes: "",
-  },
-];
-
-function formatDateFr(dateStr: string) {
-  const d = new Date(dateStr + "T00:00:00");
-  return d.toLocaleDateString("fr-FR", {
-    day: "2-digit",
-    month: "2-digit",
-  });
+interface Dinner {
+  id: string;
+  day: string;
+  date: string;
+  restaurant: string;
 }
 
-const confirmationLabels: Record<string, string> = {
-  oui: "Confirme",
-  non: "Decline",
-  peut_etre: "Peut-etre",
-};
+interface Guest {
+  id: string;
+  contact_id: string;
+  invited_by: string;
+  confirmation: "oui" | "non" | "peut_etre";
+  contact_name: string;
+  account_name?: string;
+  invited_by_name?: string;
+}
 
-const confirmationIcons: Record<string, typeof Check> = {
-  oui: Check,
-  non: X,
-  peut_etre: HelpCircle,
-};
+interface ContactSuggestion {
+  id: string;
+  name: string;
+  account_name?: string;
+}
 
 export default function DinnersPage() {
-  const { profile, isAdmin, loading: profileLoading } = useProfile();
-  const [dinners, setDinners] = useState<DinnerEvent[]>([]);
-  const [guests, setGuests] = useState<DinnerGuest[]>([]);
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { profile, isAdmin } = useProfile();
+  const supabase = createClient();
+  const [dinners, setDinners] = useState<Dinner[]>([]);
+  const [guests, setGuests] = useState<Record<string, Guest[]>>({});
+  const [openDinner, setOpenDinner] = useState<Dinner | null>(null);
 
-  // Modal state
-  const [modalOpen, setModalOpen] = useState(false);
-  const [activeDinnerId, setActiveDinnerId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [selectedContactId, setSelectedContactId] = useState<string | null>(null);
-  const [confirmation, setConfirmation] = useState<"oui" | "non" | "peut_etre">("oui");
-  const [submitting, setSubmitting] = useState(false);
-
-  // Sales list for admin grouping
-  const [salesList, setSalesList] = useState<{ id: string; full_name: string }[]>([]);
+  const [suggestions, setSuggestions] = useState<ContactSuggestion[]>([]);
+  const [confirmation, setConfirmation] = useState<"oui" | "non" | "peut_etre">("peut_etre");
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
-    if (!profile) return;
-    loadData();
+    loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile]);
 
-  async function loadData() {
-    const supabase = createClient();
-    setLoading(true);
-
-    // Load dinners
-    const { data: dinnerData } = await supabase
+  async function loadAll() {
+    if (!profile) return;
+    const { data: ds } = await supabase
       .from("dinners")
-      .select("*")
-      .order("date", { ascending: true });
+      .select("id, day, date, restaurant")
+      .order("date");
+    setDinners(ds || []);
 
-    const loadedDinners: DinnerEvent[] =
-      dinnerData && dinnerData.length > 0
-        ? dinnerData
-        : HARDCODED_DINNERS.map((d, i) => ({ ...d, id: `fallback-${i}` }));
+    const { data: gs } = await supabase
+      .from("dinner_guests")
+      .select(
+        "id, contact_id, invited_by, confirmation, dinner_id, contacts(first_name, last_name, accounts(name)), profiles!invited_by(full_name)"
+      );
 
-    setDinners(loadedDinners);
-
-    // Load guests with contact and profile info
-    const dinnerIds = loadedDinners
-      .filter((d) => !d.id.startsWith("fallback-"))
-      .map((d) => d.id);
-
-    if (dinnerIds.length > 0) {
-      const { data: guestData } = await supabase
-        .from("dinner_guests")
-        .select(
-          "*, contacts(first_name, last_name, account_id, accounts(name)), profiles:invited_by(full_name)"
-        )
-        .in("dinner_id", dinnerIds);
-
-      const mapped: DinnerGuest[] = (guestData || []).map((g: any) => ({
+    const grouped: Record<string, Guest[]> = {};
+    (gs || []).forEach((g: any) => {
+      const key = g.dinner_id;
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push({
         id: g.id,
-        dinner_id: g.dinner_id,
         contact_id: g.contact_id,
-        contact_name: g.contacts
-          ? `${g.contacts.first_name} ${g.contacts.last_name}`
-          : "—",
-        account_name: g.contacts?.accounts?.name || "—",
         invited_by: g.invited_by,
-        invited_by_name: g.profiles?.full_name || "—",
         confirmation: g.confirmation,
-        created_at: g.created_at,
-      }));
-
-      // Filter for sales: only see their own guests
-      if (isAdmin) {
-        setGuests(mapped);
-      } else {
-        setGuests(mapped.filter((g) => g.invited_by === profile!.id));
-      }
-    } else {
-      setGuests([]);
-    }
-
-    // Load contacts for autocomplete
-    let contactsQ = supabase
-      .from("contacts")
-      .select("*, accounts(name)")
-      .order("first_name");
-    if (!isAdmin) {
-      contactsQ = contactsQ.eq("created_by", profile!.id);
-    }
-    const { data: contactData } = await contactsQ;
-    setContacts(
-      (contactData || []).map((c: any) => ({
-        ...c,
-        account_name: c.accounts?.name || "—",
-      }))
-    );
-
-    // Sales list for admin view
-    if (isAdmin) {
-      const { data: sales } = await supabase
-        .from("profiles")
-        .select("id, full_name")
-        .order("full_name");
-      setSalesList(sales || []);
-    }
-
-    setLoading(false);
+        contact_name: g.contacts ? `${g.contacts.first_name} ${g.contacts.last_name}` : "—",
+        account_name: g.contacts?.accounts?.name,
+        invited_by_name: g.profiles?.full_name,
+      });
+    });
+    setGuests(grouped);
   }
 
-  // Filtered contacts for search
-  const filteredContacts = useMemo(() => {
-    if (!search.trim()) return contacts.slice(0, 10);
-    const q = search.toLowerCase();
-    return contacts
-      .filter(
-        (c) =>
-          `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) ||
-          (c.account_name || "").toLowerCase().includes(q)
-      )
-      .slice(0, 10);
-  }, [contacts, search]);
+  useEffect(() => {
+    if (!search || search.length < 2) {
+      setSuggestions([]);
+      return;
+    }
+    const t = setTimeout(async () => {
+      const { data } = await supabase
+        .from("contacts")
+        .select("id, first_name, last_name, accounts(name)")
+        .or(`first_name.ilike.%${search}%,last_name.ilike.%${search}%`)
+        .limit(8);
+      setSuggestions(
+        (data || []).map((c: any) => ({
+          id: c.id,
+          name: `${c.first_name} ${c.last_name}`,
+          account_name: c.accounts?.name,
+        }))
+      );
+    }, 200);
+    return () => clearTimeout(t);
+  }, [search, supabase]);
 
-  function openAddGuest(dinnerId: string) {
-    setActiveDinnerId(dinnerId);
-    setSearch("");
-    setSelectedContactId(null);
-    setConfirmation("oui");
-    setModalOpen(true);
-  }
-
-  async function handleAddGuest() {
-    if (!selectedContactId || !activeDinnerId || !profile) return;
-    setSubmitting(true);
-    const supabase = createClient();
-
-    const { error } = await supabase.from("dinner_guests").insert({
-      dinner_id: activeDinnerId,
-      contact_id: selectedContactId,
+  const addGuest = async (contactId: string) => {
+    if (!openDinner || !profile) return;
+    setAdding(true);
+    await supabase.from("dinner_guests").insert({
+      dinner_id: openDinner.id,
+      contact_id: contactId,
       invited_by: profile.id,
       confirmation,
     });
+    setSearch("");
+    setSuggestions([]);
+    setConfirmation("peut_etre");
+    await loadAll();
+    setAdding(false);
+  };
 
-    if (!error) {
-      setModalOpen(false);
-      await loadData();
-    }
-    setSubmitting(false);
-  }
+  const removeGuest = async (guestId: string) => {
+    await supabase.from("dinner_guests").delete().eq("id", guestId);
+    await loadAll();
+  };
 
-  function guestsForDinner(dinnerId: string) {
-    return guests.filter((g) => g.dinner_id === dinnerId);
-  }
+  const stats = useMemo(() => {
+    const s: Record<
+      string,
+      { total: number; oui: number; non: number; peut_etre: number; bySales: Record<string, number> }
+    > = {};
+    dinners.forEach((d) => {
+      const list = guests[d.id] || [];
+      const bySales: Record<string, number> = {};
+      list.forEach((g) => {
+        const k = g.invited_by_name || "?";
+        bySales[k] = (bySales[k] || 0) + 1;
+      });
+      s[d.id] = {
+        total: list.length,
+        oui: list.filter((g) => g.confirmation === "oui").length,
+        non: list.filter((g) => g.confirmation === "non").length,
+        peut_etre: list.filter((g) => g.confirmation === "peut_etre").length,
+        bySales,
+      };
+    });
+    return s;
+  }, [dinners, guests]);
 
-  // Group guests by sales for admin
-  function guestsBySales(dinnerGuests: DinnerGuest[]) {
-    const grouped: Record<string, { name: string; guests: DinnerGuest[] }> = {};
-    for (const g of dinnerGuests) {
-      if (!grouped[g.invited_by]) {
-        grouped[g.invited_by] = {
-          name: g.invited_by_name || "—",
-          guests: [],
-        };
-      }
-      grouped[g.invited_by].guests.push(g);
-    }
-    return Object.values(grouped);
-  }
-
-  if (profileLoading || loading) {
-    return (
-      <div className="flex items-center justify-center py-20">
-        <div className="animate-spin h-8 w-8 border-2 border-primary border-t-transparent rounded-full" />
-      </div>
-    );
-  }
+  const formatDate = (d: string) => {
+    const date = new Date(d);
+    return date.toLocaleDateString("fr-FR", { day: "numeric", month: "long" });
+  };
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <UtensilsCrossed size={24} className="text-warning" />
-        <div>
-          <h1 className="text-xl font-bold">Dinners GITEX</h1>
-          <p className="text-sm text-text-muted">
-            Planning des diners — Semaine du 7 au 10 avril
-          </p>
-        </div>
+    <div className="space-y-4 pb-8 animate-fade-in">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight">Dinners</h1>
+        <p className="text-text-muted text-sm">Vue d&apos;ensemble des invitations</p>
       </div>
 
-      {/* Dinner Cards */}
-      <div className="space-y-4">
-        {dinners.map((dinner) => {
-          const dinnerGuests = guestsForDinner(dinner.id);
-          const isFallback = dinner.id.startsWith("fallback-");
-
+      <div className="space-y-3">
+        {dinners.map((d) => {
+          const stat = stats[d.id] || { total: 0, oui: 0, non: 0, peut_etre: 0, bySales: {} };
           return (
-            <Card key={dinner.id} className="p-0 overflow-hidden">
-              {/* Card Header */}
-              <div className="bg-surface-2 px-5 py-4 border-b border-border">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h2 className="text-lg font-bold">
-                      {dinner.day} {formatDateFr(dinner.date)}
-                    </h2>
-                    <p className="text-text-muted text-sm flex items-center gap-2">
-                      <UtensilsCrossed size={14} />
-                      {dinner.restaurant}
-                      {dinner.notes && (
-                        <span className="text-xs opacity-70">
-                          — {dinner.notes}
-                        </span>
-                      )}
-                    </p>
+            <div
+              key={d.id}
+              className="bg-surface border border-border rounded-2xl overflow-hidden shadow-sm card-hover"
+            >
+              <div className="p-4">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-11 h-11 rounded-xl bg-primary-soft text-primary flex items-center justify-center flex-shrink-0">
+                      <UtensilsCrossed size={20} />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-base">{d.restaurant}</h3>
+                      <p className="text-xs text-text-muted flex items-center gap-1 mt-0.5">
+                        <Calendar size={11} /> {d.day} {formatDate(d.date)}
+                      </p>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="text-2xl font-bold text-primary">
-                      {dinnerGuests.length}
-                    </span>
-                    <span className="text-xs text-text-muted">
-                      invite{dinnerGuests.length !== 1 ? "s" : ""}
-                    </span>
-                  </div>
+                  <button
+                    onClick={() => setOpenDinner(d)}
+                    className="w-9 h-9 rounded-xl bg-primary text-white flex items-center justify-center hover:bg-primary-hover transition-all"
+                  >
+                    <UserPlus size={16} />
+                  </button>
                 </div>
+
+                <div className="grid grid-cols-4 gap-2 mb-3">
+                  <Stat label="Invités" value={stat.total} icon={Users} />
+                  <Stat label="Oui" value={stat.oui} icon={Check} color="text-success" />
+                  <Stat label="Peut-être" value={stat.peut_etre} icon={HelpCircle} color="text-warning" />
+                  <Stat label="Non" value={stat.non} icon={X} color="text-danger" />
+                </div>
+
+                {isAdmin && Object.keys(stat.bySales).length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-3 border-t border-border">
+                    {Object.entries(stat.bySales).map(([sales, count]) => (
+                      <span
+                        key={sales}
+                        className="text-[10px] px-2 py-1 bg-surface-2 rounded-lg text-text-muted"
+                      >
+                        {sales} <span className="text-text font-medium">{count}</span>
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Guest List */}
-              <div className="px-5 py-3">
-                {dinnerGuests.length === 0 && (
-                  <p className="text-text-muted text-sm text-center py-4">
-                    Aucun invite pour le moment
-                  </p>
-                )}
-
-                {/* Admin view: grouped by sales */}
-                {isAdmin && dinnerGuests.length > 0 && (
-                  <div className="space-y-4">
-                    {guestsBySales(dinnerGuests).map((group) => (
-                      <div key={group.name}>
-                        <p className="text-xs font-bold text-text-muted uppercase tracking-wider mb-2">
-                          {group.name}{" "}
-                          <span className="text-primary">
-                            ({group.guests.length})
-                          </span>
-                        </p>
-                        <div className="space-y-2">
-                          {group.guests.map((guest) => (
-                            <GuestRow key={guest.id} guest={guest} showInviter={false} />
-                          ))}
+              {(guests[d.id] || []).length > 0 && (
+                <details className="border-t border-border">
+                  <summary className="px-4 py-2.5 text-xs text-text-muted cursor-pointer hover:bg-surface-2 transition-colors select-none">
+                    Voir les {(guests[d.id] || []).length} invités
+                  </summary>
+                  <div className="px-4 pb-3 space-y-1.5">
+                    {(guests[d.id] || []).map((g) => (
+                      <div
+                        key={g.id}
+                        className="flex items-center gap-2 text-sm py-1.5 px-2 rounded-lg hover:bg-surface-2"
+                      >
+                        <ConfBadge c={g.confirmation} />
+                        <div className="flex-1 min-w-0">
+                          <div className="truncate font-medium">{g.contact_name}</div>
+                          {g.account_name && (
+                            <div className="text-[11px] text-text-muted truncate">
+                              {g.account_name}
+                            </div>
+                          )}
                         </div>
+                        {isAdmin && (
+                          <span className="text-[10px] text-text-muted hidden sm:inline">
+                            par {g.invited_by_name?.split(" ")[0]}
+                          </span>
+                        )}
+                        {(isAdmin || g.invited_by === profile?.id) && (
+                          <button
+                            onClick={() => removeGuest(g.id)}
+                            className="text-text-muted hover:text-danger p-1"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
                       </div>
                     ))}
                   </div>
-                )}
-
-                {/* Sales view: flat list */}
-                {!isAdmin && dinnerGuests.length > 0 && (
-                  <div className="space-y-2">
-                    {dinnerGuests.map((guest) => (
-                      <GuestRow key={guest.id} guest={guest} showInviter={false} />
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              {/* Add Guest Button */}
-              {!isFallback && (
-                <div className="px-5 pb-4">
-                  <Button
-                    variant="secondary"
-                    size="lg"
-                    className="w-full"
-                    onClick={() => openAddGuest(dinner.id)}
-                  >
-                    <UserPlus size={20} />
-                    Ajouter un invite
-                  </Button>
-                </div>
+                </details>
               )}
-            </Card>
+            </div>
           );
         })}
       </div>
 
-      {/* Add Guest Modal */}
       <Modal
-        open={modalOpen}
-        onClose={() => setModalOpen(false)}
-        title="Ajouter un invite"
+        open={!!openDinner}
+        onClose={() => setOpenDinner(null)}
+        title={`Inviter à ${openDinner?.restaurant || ""}`}
       >
-        <div className="space-y-5">
-          {/* Contact Search */}
-          <div>
-            <label className="text-sm font-medium text-text-muted mb-2 block">
-              Rechercher un contact
-            </label>
+        <div className="space-y-4">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-muted" />
             <input
               type="text"
-              placeholder="Nom, prenom ou compte..."
               value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setSelectedContactId(null);
-              }}
-              className="w-full px-4 py-3 bg-surface-2 border border-border rounded-xl text-base focus:outline-none focus:ring-2 focus:ring-primary/50"
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Rechercher un contact..."
+              autoFocus
+              className="pl-9"
             />
           </div>
 
-          {/* Contact Results */}
-          {!selectedContactId && (
-            <div className="space-y-1 max-h-48 overflow-y-auto">
-              {filteredContacts.length === 0 && (
-                <p className="text-text-muted text-sm text-center py-3">
-                  Aucun contact trouve
-                </p>
-              )}
-              {filteredContacts.map((c) => (
+          <div>
+            <p className="text-xs font-medium text-text-secondary uppercase tracking-wider mb-2">
+              Statut
+            </p>
+            <div className="grid grid-cols-3 gap-2">
+              {[
+                { v: "oui" as const, label: "Oui", color: "border-success/30 bg-success/5 text-success" },
+                { v: "peut_etre" as const, label: "Peut-être", color: "border-warning/30 bg-warning/5 text-warning" },
+                { v: "non" as const, label: "Non", color: "border-danger/30 bg-danger/5 text-danger" },
+              ].map((opt) => (
                 <button
-                  key={c.id}
-                  onClick={() => {
-                    setSelectedContactId(c.id);
-                    setSearch(`${c.first_name} ${c.last_name}`);
-                  }}
-                  className="w-full text-left px-4 py-3 rounded-xl hover:bg-surface-2 active:bg-border transition-colors cursor-pointer"
+                  key={opt.v}
+                  onClick={() => setConfirmation(opt.v)}
+                  className={cn(
+                    "py-2.5 rounded-xl border-2 text-sm font-medium transition-all",
+                    confirmation === opt.v
+                      ? opt.color
+                      : "border-border bg-surface-2 hover:border-border-strong text-text-muted"
+                  )}
                 >
-                  <p className="font-medium">
-                    {c.first_name} {c.last_name}
-                  </p>
-                  <p className="text-xs text-text-muted">
-                    {c.account_name}
-                    {c.job_title && ` — ${c.job_title}`}
-                  </p>
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {suggestions.length > 0 && (
+            <div className="space-y-1 max-h-64 overflow-auto">
+              {suggestions.map((s) => (
+                <button
+                  key={s.id}
+                  onClick={() => addGuest(s.id)}
+                  disabled={adding}
+                  className="w-full text-left px-3 py-2.5 rounded-xl bg-surface-2 hover:bg-surface-3 transition-colors flex items-center justify-between disabled:opacity-50"
+                >
+                  <div>
+                    <div className="text-sm font-medium">{s.name}</div>
+                    {s.account_name && (
+                      <div className="text-xs text-text-muted">{s.account_name}</div>
+                    )}
+                  </div>
+                  <UserPlus size={14} className="text-primary" />
                 </button>
               ))}
             </div>
           )}
 
-          {/* Selected Contact */}
-          {selectedContactId && (
-            <div className="bg-surface-2 rounded-xl px-4 py-3 flex items-center justify-between">
-              <div>
-                <p className="font-medium">{search}</p>
-                <p className="text-xs text-text-muted">Contact selectionne</p>
-              </div>
-              <button
-                onClick={() => {
-                  setSelectedContactId(null);
-                  setSearch("");
-                }}
-                className="p-2 hover:bg-border rounded-lg transition-colors"
-              >
-                <X size={16} />
-              </button>
-            </div>
+          {search.length >= 2 && suggestions.length === 0 && (
+            <p className="text-sm text-text-muted text-center py-4">
+              Aucun contact trouvé. Crée-le d&apos;abord depuis Capture.
+            </p>
           )}
-
-          {/* Confirmation Buttons */}
-          <div>
-            <label className="text-sm font-medium text-text-muted mb-3 block">
-              Confirmation
-            </label>
-            <div className="grid grid-cols-3 gap-3">
-              <button
-                onClick={() => setConfirmation("oui")}
-                className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all cursor-pointer ${
-                  confirmation === "oui"
-                    ? "border-green-500 bg-green-500/10 text-green-400"
-                    : "border-border bg-surface-2 text-text-muted hover:border-green-500/50"
-                }`}
-              >
-                <Check size={24} />
-                <span className="text-sm font-semibold">Oui</span>
-              </button>
-              <button
-                onClick={() => setConfirmation("peut_etre")}
-                className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all cursor-pointer ${
-                  confirmation === "peut_etre"
-                    ? "border-yellow-500 bg-yellow-500/10 text-yellow-400"
-                    : "border-border bg-surface-2 text-text-muted hover:border-yellow-500/50"
-                }`}
-              >
-                <HelpCircle size={24} />
-                <span className="text-sm font-semibold">Peut-etre</span>
-              </button>
-              <button
-                onClick={() => setConfirmation("non")}
-                className={`flex flex-col items-center gap-2 p-4 rounded-xl border-2 transition-all cursor-pointer ${
-                  confirmation === "non"
-                    ? "border-red-500 bg-red-500/10 text-red-400"
-                    : "border-border bg-surface-2 text-text-muted hover:border-red-500/50"
-                }`}
-              >
-                <X size={24} />
-                <span className="text-sm font-semibold">Non</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Submit */}
-          <Button
-            variant="primary"
-            size="lg"
-            className="w-full"
-            disabled={!selectedContactId}
-            loading={submitting}
-            onClick={handleAddGuest}
-          >
-            <Plus size={20} />
-            Ajouter cet invite
-          </Button>
         </div>
       </Modal>
     </div>
   );
 }
 
-/* --- Guest Row Component --- */
-function GuestRow({
-  guest,
-  showInviter,
+function Stat({
+  label,
+  value,
+  icon: Icon,
+  color = "text-text",
 }: {
-  guest: DinnerGuest;
-  showInviter: boolean;
+  label: string;
+  value: number;
+  icon: React.ComponentType<{ size?: number }>;
+  color?: string;
 }) {
-  const Icon = confirmationIcons[guest.confirmation] || HelpCircle;
-
   return (
-    <div className="flex items-center gap-3 py-2 px-3 rounded-xl bg-surface-2/50">
-      <div className="flex-1 min-w-0">
-        <p className="font-medium text-sm truncate">{guest.contact_name}</p>
-        <p className="text-xs text-text-muted truncate">
-          {guest.account_name}
-          {showInviter && guest.invited_by_name && (
-            <span> — invite par {guest.invited_by_name}</span>
-          )}
-        </p>
+    <div className="bg-surface-2 rounded-xl px-2 py-2 text-center">
+      <div className={cn("flex items-center justify-center gap-1", color)}>
+        <Icon size={12} />
+        <span className="font-semibold text-base tabular-nums">{value}</span>
       </div>
-      <Badge variant={guest.confirmation}>
-        <Icon size={12} className="mr-1" />
-        {confirmationLabels[guest.confirmation] || guest.confirmation}
-      </Badge>
+      <div className="text-[10px] text-text-muted mt-0.5">{label}</div>
+    </div>
+  );
+}
+
+function ConfBadge({ c }: { c: "oui" | "non" | "peut_etre" }) {
+  const map = {
+    oui: { icon: Check, color: "bg-success/15 text-success" },
+    non: { icon: X, color: "bg-danger/15 text-danger" },
+    peut_etre: { icon: HelpCircle, color: "bg-warning/15 text-warning" },
+  };
+  const { icon: Icon, color } = map[c];
+  return (
+    <div className={cn("w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0", color)}>
+      <Icon size={12} />
     </div>
   );
 }

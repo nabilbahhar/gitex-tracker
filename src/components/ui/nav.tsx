@@ -3,20 +3,14 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
-import {
-  LayoutDashboard,
-  Building2,
-  Users,
-  MessageSquare,
-  UtensilsCrossed,
-} from "lucide-react";
+import { Zap, MessageSquare, Building2, UtensilsCrossed, BarChart3 } from "lucide-react";
 
 const links = [
-  { href: "/", label: "Home", icon: LayoutDashboard },
-  { href: "/accounts", label: "Comptes", icon: Building2 },
-  { href: "/contacts", label: "Contacts", icon: Users },
+  { href: "/", label: "Capture", icon: Zap },
   { href: "/interactions", label: "Notes", icon: MessageSquare },
+  { href: "/accounts", label: "Comptes", icon: Building2 },
   { href: "/dinners", label: "Dinners", icon: UtensilsCrossed },
+  { href: "/dashboard", label: "Stats", icon: BarChart3 },
 ];
 
 export function BottomNav() {
@@ -36,9 +30,7 @@ export function BottomNav() {
               href={link.href}
               className={cn(
                 "relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[60px]",
-                isActive
-                  ? "text-primary"
-                  : "text-text-muted hover:text-text"
+                isActive ? "text-primary" : "text-text-muted hover:text-text"
               )}
             >
               {isActive && (
