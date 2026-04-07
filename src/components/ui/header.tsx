@@ -1,9 +1,10 @@
 "use client";
 
-import { LogOut, Shield } from "lucide-react";
+import { LogOut, Sparkles } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import type { Profile } from "@/lib/types";
+import { ThemeToggle } from "./theme-toggle";
 
 export function Header({ profile }: { profile: Profile | null }) {
   const router = useRouter();
@@ -14,34 +15,35 @@ export function Header({ profile }: { profile: Profile | null }) {
     router.push("/login");
   };
 
+  const initial = profile?.full_name?.[0]?.toUpperCase() || "?";
+
   return (
-    <header className="sticky top-0 z-30 bg-bg/90 backdrop-blur-xl border-b border-border px-4 py-3">
-      <div className="flex items-center justify-between max-w-3xl mx-auto">
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-white font-bold text-sm">G</span>
+    <header className="sticky top-0 z-30 glass border-b border-border safe-area-top">
+      <div className="max-w-3xl mx-auto px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div className="relative w-9 h-9 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-sm">
+            <Sparkles size={18} className="text-white" strokeWidth={2.5} />
           </div>
           <div>
-            <h1 className="text-sm font-bold leading-none">GITEX Tracker</h1>
-            <p className="text-[10px] text-text-muted">Compucom</p>
+            <h1 className="text-sm font-semibold leading-none tracking-tight">GITEX Tracker</h1>
+            <p className="text-[11px] text-text-muted mt-0.5">Compucom Morocco</p>
           </div>
         </div>
+
         <div className="flex items-center gap-2">
-          {profile?.role === "admin" && (
-            <span className="flex items-center gap-1 text-xs text-accent bg-accent/10 px-2 py-1 rounded-lg">
-              <Shield size={12} />
-              Admin
-            </span>
-          )}
-          <span className="text-xs text-text-muted hidden sm:inline">
-            {profile?.full_name}
-          </span>
-          <button
-            onClick={handleLogout}
-            className="p-2 hover:bg-surface-2 rounded-xl transition-colors text-text-muted hover:text-danger"
-          >
-            <LogOut size={18} />
-          </button>
+          <ThemeToggle />
+          <div className="flex items-center gap-2 pl-2 border-l border-border">
+            <div className="w-9 h-9 rounded-xl bg-primary-soft text-primary flex items-center justify-center font-semibold text-sm">
+              {initial}
+            </div>
+            <button
+              onClick={handleLogout}
+              className="w-9 h-9 rounded-xl flex items-center justify-center text-text-muted hover:text-danger hover:bg-surface-2 transition-all"
+              aria-label="Logout"
+            >
+              <LogOut size={16} />
+            </button>
+          </div>
         </div>
       </div>
     </header>

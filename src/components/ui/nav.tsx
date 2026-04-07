@@ -23,8 +23,8 @@ export function BottomNav() {
   const pathname = usePathname();
 
   return (
-    <nav className="fixed bottom-0 left-0 right-0 z-40 bg-surface/95 backdrop-blur-xl border-t border-border safe-area-bottom">
-      <div className="flex items-center justify-around px-2 py-1">
+    <nav className="fixed bottom-0 left-0 right-0 z-40 glass border-t border-border safe-area-bottom">
+      <div className="max-w-3xl mx-auto flex items-center justify-around px-2 py-1.5">
         {links.map((link) => {
           const isActive =
             pathname === link.href ||
@@ -35,14 +35,17 @@ export function BottomNav() {
               key={link.href}
               href={link.href}
               className={cn(
-                "flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-colors min-w-[60px]",
+                "relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all min-w-[60px]",
                 isActive
                   ? "text-primary"
                   : "text-text-muted hover:text-text"
               )}
             >
-              <Icon size={22} strokeWidth={isActive ? 2.5 : 1.5} />
-              <span className="text-[10px] font-medium">{link.label}</span>
+              {isActive && (
+                <span className="absolute inset-0 bg-primary-soft rounded-xl -z-10" />
+              )}
+              <Icon size={20} strokeWidth={isActive ? 2.5 : 1.75} />
+              <span className="text-[10px] font-medium tracking-tight">{link.label}</span>
             </Link>
           );
         })}
