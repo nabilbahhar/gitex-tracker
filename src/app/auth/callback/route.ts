@@ -20,14 +20,22 @@ export async function GET(request: Request) {
           .eq("id", user.id)
           .single();
 
+        const ADMIN_EMAILS = ["a.lahkim@compucom.ma", "n.bahhar@compucom.ma"];
+        const isAdmin = ADMIN_EMAILS.includes(user.email || "");
+
         if (!profile) {
-          const isAdmin = user.email === "achraf@compucom.ma";
           await supabase.from("profiles").insert({
             id: user.id,
             email: user.email,
             full_name: user.email?.split("@")[0] || "User",
             role: isAdmin ? "admin" : "sales",
           });
+        } else if (isAdmin) {
+          // Ensure existing admin profiles stay admin
+          await supabase
+            .from("profiles")
+            .update({ role: "admin" })
+            .eq("id", user.id);
         }
       }
       return NextResponse.redirect(origin);
